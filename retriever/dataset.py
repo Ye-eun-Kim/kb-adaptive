@@ -99,9 +99,10 @@ class RetrievalDataset(Dataset):
                     data = pickle.load(f)
                 if data.get("meta") == meta:
                     self._grouped = data["grouped"]
+                    print(f"[retrieval dataset] Loaded {self.split} from cache: {cache_path}", flush=True)
                     return
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[retrieval dataset] Cache load failed: {e}", flush=True)
         for item in tqdm(self.qa_items, desc=f"Building {self.split} retrieval dataset"):
             table_id = item.get("table_id")
             if not table_id:
@@ -150,10 +151,13 @@ class RetrievalDataset(Dataset):
         self._grouped = self._group_by_question_table()
         os.makedirs(cache_dir, exist_ok=True)
         try:
-            with open(cache_path, "wb") as f:
+            tmp_path = cache_path + ".tmp"
+            with open(tmp_path, "wb") as f:
                 pickle.dump({"meta": meta, "grouped": self._grouped}, f)
-        except Exception:
-            pass
+            os.replace(tmp_path, cache_path)
+            print(f"[retrieval dataset] Saved {self.split} cache: {cache_path}", flush=True)
+        except Exception as e:
+            print(f"[retrieval dataset] Cache save failed: {e}", flush=True)
 
     def _group_by_question_table(self):
         from collections import defaultdict

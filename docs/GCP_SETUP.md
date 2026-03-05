@@ -139,6 +139,7 @@ mv data tables entity_base dataset_ketqa 2>/dev/null || true
 
 ```bash
 source ~/venv/bin/activate
+chmod +x scripts/*.sh
 ./scripts/run_training_gcp.sh
 ```
 
