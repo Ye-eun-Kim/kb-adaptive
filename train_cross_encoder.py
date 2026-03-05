@@ -20,6 +20,7 @@ from retriever.config import (
     LEARNING_RATE,
     WARMUP_RATIO,
     DROPOUT_RATE,
+    ADAMW_WEIGHT_DECAY,
     CROSS_ENCODER_EPOCHS,
     CROSS_ENCODER_BATCH_SIZE,
     CROSS_ENCODER_N_NEGATIVES,
@@ -43,8 +44,9 @@ def main():
     parser.add_argument("--model_name", type=str, default=CROSS_ENCODER_MODEL)
     parser.add_argument("--epochs", type=int, default=CROSS_ENCODER_EPOCHS)
     parser.add_argument("--batch_size", type=int, default=CROSS_ENCODER_BATCH_SIZE,
-                        help="16GB 램/맥북에서는 8~16 권장")
-    parser.add_argument("--n_negatives", type=int, default=CROSS_ENCODER_N_NEGATIVES)
+                        help="CPU/맥북: 2~4 권장. 배치당 (batch*(1+n_neg))개 샘플이라 RAM 많이 씀")
+    parser.add_argument("--n_negatives", type=int, default=CROSS_ENCODER_N_NEGATIVES,
+                        help="CPU/맥북: 10 정도로 줄이면 OOM/killed 방지")
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--max_triples_per_table", type=int, default=3000)
@@ -94,7 +96,7 @@ def main():
     model.roberta.resize_token_embeddings(len(tokenizer))
     model = model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=ADAMW_WEIGHT_DECAY)
     total_steps = len(train_loader) * args.epochs
     from transformers import get_linear_schedule_with_warmup
     scheduler = get_linear_schedule_with_warmup(

@@ -1,5 +1,7 @@
-# KET-QA 대용량 데이터셋 (로컬에서만 유지)
+# KET-QA 대용량 데이터셋 (로컬/GCS 사용, 저장소에는 미포함)
 dataset_ketqa/
+dataset_ketqa.zip
+*.zip
 
 # 학습/평가 출력
 outputs/

@@ -41,37 +41,58 @@ def recall_at_k(retrieved_serialized: list, gold: set, k: int) -> float:
     return hit / len(gold)
 
 
+def _resolve_ckpt(dir_path: str, filename: str) -> str:
+    """지정한 파일이 없으면 해당 디렉터리에서 epoch_*.pt 중 가장 최신 파일 사용."""
+    path = os.path.join(dir_path, filename)
+    if os.path.isfile(path):
+        return filename
+    import glob
+    candidates = glob.glob(os.path.join(dir_path, "epoch_*.pt"))
+    if not candidates:
+        raise FileNotFoundError(f"No checkpoint found in {dir_path}. Expected {filename} or epoch_*.pt")
+    latest = max(candidates, key=lambda p: int(p.replace(".pt", "").split("epoch_")[-1]))
+    return os.path.basename(latest)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, default="dataset_ketqa")
     parser.add_argument("--split", type=str, default="dev")
     parser.add_argument("--bi_encoder_path", type=str, default="outputs/bi_encoder")
     parser.add_argument("--cross_encoder_path", type=str, default="outputs/cross_encoder")
-    parser.add_argument("--bi_ckpt", type=str, default="epoch_20.pt", help="Bi-encoder checkpoint filename")
-    parser.add_argument("--cross_ckpt", type=str, default="epoch_5.pt", help="Cross-encoder checkpoint filename")
+    parser.add_argument("--bi_ckpt", type=str, default="epoch_20.pt",
+                        help="Bi-encoder 체크포인트 파일명. 없으면 해당 디렉터리에서 최신 epoch_*.pt 자동 선택")
+    parser.add_argument("--cross_ckpt", type=str, default="epoch_5.pt",
+                        help="Cross-encoder 체크포인트 파일명. 없으면 해당 디렉터리에서 최신 epoch_*.pt 자동 선택")
     parser.add_argument("--top_n", type=int, default=200)
     parser.add_argument("--top_k", type=int, default=20)
-    parser.add_argument("--max_eval", type=int, default=None)
+    parser.add_argument("--max_eval", type=int, default=None,
+                        help="평가할 샘플 수 상한. 미지정 시 전체 데이터로 평가")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
     set_data_paths(args.data_root)
     from retriever.config import TABLE_DIR, ENTITY_BASE_DIR, QA_DATA_DIR
 
+    bi_ckpt = _resolve_ckpt(args.bi_encoder_path, args.bi_ckpt)
+    cross_ckpt = _resolve_ckpt(args.cross_encoder_path, args.cross_ckpt)
+    print(f"Bi-encoder checkpoint: {bi_ckpt}, Cross-encoder checkpoint: {cross_ckpt}")
+
     tokenizer_q = BertTokenizer.from_pretrained(args.bi_encoder_path)
     tokenizer_ctx = BertTokenizer.from_pretrained(os.path.join(args.bi_encoder_path, "tokenizer_ctx"))
     tokenizer_cross = RobertaTokenizer.from_pretrained(args.cross_encoder_path)
 
+    # 체크포인트는 학습 시 추가한 special token 포함 vocab 크기로 저장됨 → 로드 전에 resize 필요
     bi_encoder = BiEncoder(model_name="bert-base-uncased", dropout=0.1)
-    ckpt = torch.load(os.path.join(args.bi_encoder_path, args.bi_ckpt), map_location="cpu")
-    bi_encoder.load_state_dict(ckpt["model_state"], strict=False)
     bi_encoder.query_encoder.resize_token_embeddings(len(tokenizer_q))
     bi_encoder.context_encoder.resize_token_embeddings(len(tokenizer_ctx))
+    ckpt = torch.load(os.path.join(args.bi_encoder_path, bi_ckpt), map_location="cpu")
+    bi_encoder.load_state_dict(ckpt["model_state"], strict=False)
 
     cross_encoder = CrossEncoder(model_name="roberta-base", dropout=0.1)
-    ckpt_c = torch.load(os.path.join(args.cross_encoder_path, args.cross_ckpt), map_location="cpu")
-    cross_encoder.load_state_dict(ckpt_c["model_state"], strict=False)
     cross_encoder.roberta.resize_token_embeddings(len(tokenizer_cross))
+    ckpt_c = torch.load(os.path.join(args.cross_encoder_path, cross_ckpt), map_location="cpu")
+    cross_encoder.load_state_dict(ckpt_c["model_state"], strict=False)
 
     device = torch.device(args.device)
     bi_encoder = bi_encoder.to(device)
@@ -90,8 +111,11 @@ def main():
     )
 
     items = load_qa_split(QA_DATA_DIR, args.split)
-    if args.max_eval:
+    if args.max_eval is not None:
         items = items[: args.max_eval]
+        print(f"Evaluating on first {len(items)} samples (--max_eval={args.max_eval})")
+    else:
+        print(f"Evaluating on full {args.split} set ({len(items)} samples)")
 
     r1, r5, r20, r100 = 0.0, 0.0, 0.0, 0.0
     n = 0

@@ -48,10 +48,10 @@ python eval_retriever.py --data_root dataset_ketqa --split dev
 python run_retrieval.py --question "What was the release date?" --table_id "Gene_Tierney_1" --top_k 20
 ```
 
-### 맥북 M4 Pro / 16GB RAM
+### 맥북 M4 Pro / 16~18GB (MPS / CPU)
 
-- `--batch_size`: Bi-encoder **4~8**, Cross-encoder **8~16** 권장 (기본 16/32는 OOM 가능).
-- `--device` 미지정 시 `mps`(Mac GPU) 자동 사용. 문제 있으면 `--device cpu`.
+- **Bi-encoder**: MPS OOM 시 `--device cpu` 또는 `--batch_size 2 --n_negatives 10`.
+- **Cross-encoder**: 배치당 `batch_size × (1 + n_negatives)` 개 RoBERTa forward라 RAM을 많이 씀. **CPU에서 `killed` 나면** `--batch_size 2 --n_negatives 10` (또는 15) 로 줄이기.
 
 ### kNS (kNN Negative Sampling)
 

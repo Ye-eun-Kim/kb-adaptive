@@ -55,7 +55,8 @@ def main():
     parser.add_argument("--fixed_k_list", type=str, default="5,10,20,50,100", help="Fixed-k baseline에 쓸 k 목록 (쉼표)")
     parser.add_argument("--adaptive_top_frac", type=float, default=0.9, help="Adaptive-k: largest gap 검사 구간 (상위 비율)")
     parser.add_argument("--adaptive_buffer", type=int, default=5, help="Adaptive-k: k에 더할 buffer")
-    parser.add_argument("--max_eval", type=int, default=None)
+    parser.add_argument("--max_eval", type=int, default=None,
+                        help="평가할 샘플 수 상한. 미지정 시 전체 데이터로 평가")
     parser.add_argument("--output_dir", type=str, default="outputs/eval_adaptive_k")
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args()
@@ -102,8 +103,11 @@ def main():
     )
 
     items = load_qa_split(QA_DATA_DIR, args.split)
-    if args.max_eval:
+    if args.max_eval is not None:
         items = items[: args.max_eval]
+        print(f"Evaluating on first {len(items)} samples (--max_eval={args.max_eval})")
+    else:
+        print(f"Evaluating on full {args.split} set ({len(items)} samples)")
 
     # per-item: full ranked list (serialized order), gold set
     # aggregate: recall for each fixed-k, recall for adaptive-k, avg k for adaptive

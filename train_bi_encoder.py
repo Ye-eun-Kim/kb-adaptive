@@ -21,6 +21,7 @@ from retriever.config import (
     LEARNING_RATE,
     WARMUP_RATIO,
     DROPOUT_RATE,
+    ADAMW_WEIGHT_DECAY,
     BI_ENCODER_EPOCHS,
     BI_ENCODER_BATCH_SIZE,
     BI_ENCODER_N_NEGATIVES,
@@ -44,9 +45,10 @@ def main():
     parser.add_argument("--model_name", type=str, default=BI_ENCODER_MODEL)
     parser.add_argument("--epochs", type=int, default=BI_ENCODER_EPOCHS)
     parser.add_argument("--batch_size", type=int, default=BI_ENCODER_BATCH_SIZE,
-                        help="16GB 램/맥북에서는 4~8 권장")
+                        help="맥북 MPS 18GB: 2 권장. 16GB 램: 4~8")
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
-    parser.add_argument("--n_negatives", type=int, default=BI_ENCODER_N_NEGATIVES)
+    parser.add_argument("--n_negatives", type=int, default=BI_ENCODER_N_NEGATIVES,
+                        help="맥북 MPS OOM 시 10 등으로 줄이기")
     parser.add_argument("--max_length_q", type=int, default=128)
     parser.add_argument("--max_length_ctx", type=int, default=256)
     parser.add_argument("--max_triples_per_table", type=int, default=3000)
@@ -110,7 +112,7 @@ def main():
     model.context_encoder.resize_token_embeddings(len(tokenizer_ctx))
     model = model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=ADAMW_WEIGHT_DECAY)
     total_steps = len(train_loader) * args.epochs
     from transformers import get_linear_schedule_with_warmup
     scheduler = get_linear_schedule_with_warmup(
