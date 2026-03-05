@@ -5,6 +5,7 @@ positive = gold evidence (In KB), negative = kNN or random from non-gold.
 
 import json
 import os
+import pickle
 from typing import Callable
 
 import torch
@@ -75,12 +76,32 @@ class RetrievalDataset(Dataset):
         self.sentence_encoder_for_knn = sentence_encoder_for_knn
         self.device = device
 
-        # Precompute per (table_id, question_id): table, triples, gold set
-        self._samples = []  # list of (q, table_serialized_per_triple, triple_serialized, head_id, label)
+        # Precompute per (table_id, question_id): table, triples, gold set (또는 캐시에서 로드)
+        self._samples = []
         self._build_samples()
 
     def _build_samples(self):
         from tqdm import tqdm
+        # 캐시: data_root/.retrieval_cache/{split}_mt{max_triples}_cross{cross}.pkl
+        data_root = os.path.dirname(self.table_dir)
+        cache_dir = os.path.join(data_root, ".retrieval_cache")
+        cache_name = f"{self.split}_mt{self.max_triples_per_table}_cross{self.for_cross_encoder}_n{len(self.qa_items)}.pkl"
+        cache_path = os.path.join(cache_dir, cache_name)
+        meta = {
+            "split": self.split,
+            "max_triples_per_table": self.max_triples_per_table,
+            "for_cross_encoder": self.for_cross_encoder,
+            "n_qa_items": len(self.qa_items),
+        }
+        if os.path.isfile(cache_path):
+            try:
+                with open(cache_path, "rb") as f:
+                    data = pickle.load(f)
+                if data.get("meta") == meta:
+                    self._grouped = data["grouped"]
+                    return
+            except Exception:
+                pass
         for item in tqdm(self.qa_items, desc=f"Building {self.split} retrieval dataset"):
             table_id = item.get("table_id")
             if not table_id:
@@ -127,6 +148,12 @@ class RetrievalDataset(Dataset):
         # Option B: Each item = (q, context, label). Sample batches such that we have at least one positive per question; use in-batch negatives (other contexts in batch as negatives). That's another common approach.
         # Paper uses explicit kNN negatives. So we need to precompute for each (q, table): positives, and n negatives (kNN from non-positives). So we need to go back and build grouped samples.
         self._grouped = self._group_by_question_table()
+        os.makedirs(cache_dir, exist_ok=True)
+        try:
+            with open(cache_path, "wb") as f:
+                pickle.dump({"meta": meta, "grouped": self._grouped}, f)
+        except Exception:
+            pass
 
     def _group_by_question_table(self):
         from collections import defaultdict
