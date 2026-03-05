@@ -45,8 +45,8 @@ gcloud compute ssh ketqa-train --zone=$ZONE
 1. [Cloud Console](https://console.cloud.google.com/) → 상단 프로젝트 선택/생성
 2. **결제** 연결 (무료 체험 $300 자동 적용)
 3. **API 사용 설정**
-   - **Compute Engine API** 사용
-   - **Cloud Storage API** 사용 (GCS로 데이터셋 전달 시 필요)
+  - **Compute Engine API** 사용
+  - **Cloud Storage API** 사용 (GCS로 데이터셋 전달 시 필요)
 
 ---
 
@@ -111,7 +111,7 @@ chmod +x scripts/*.sh
 ./scripts/gcp_setup_vm.sh
 ```
 
-Python 3.10, venv, PyTorch(CUDA), transformers 등이 설치됩니다.
+Python 3.11, venv, PyTorch(CUDA), transformers 등이 설치됩니다.
 
 ### 5.3 GCS에서 데이터셋 받기
 
@@ -172,9 +172,12 @@ gcloud compute scp --recurse ketqa-train:~/kb-adaptive/outputs ./outputs_from_gc
 
 ## 8. 트러블슈팅
 
-| 현상 | 조치 |
-|------|------|
-| `acceleratorTypes/nvidia-tesla-t4 was not found` | `us-central1-a` 또는 `asia-northeast1-a` 등 T4 지원 zone 사용 |
-| `nvidia-smi` 없음 | VM 부팅 후 2–3분 대기 (드라이버 자동 설치) |
-| `Dataset not found` | `ls dataset_ketqa/data` 로 train.json 있는지 확인, 경로가 `~/kb-adaptive/dataset_ketqa` 인지 확인 |
-| CUDA OOM | `--batch_size 8` (bi), `--batch_size 16` (cross) 로 줄이기 |
+
+| 현상                                               | 조치                                                                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `acceleratorTypes/nvidia-tesla-t4 was not found` | `us-central1-a` 또는 `asia-northeast1-a` 등 T4 지원 zone 사용                                                   |
+| `nvidia-smi` 없음                                  | VM 부팅 후 2–3분 대기 (드라이버 자동 설치)                                                                             |
+| `Dataset not found`                              | `ls dataset_ketqa/data` 로 train.json 있는지 확인, 경로가 `~/kb-adaptive/dataset_ketqa` 인지 확인                     |
+| CUDA OOM (L4 24GB 등)                             | 논문 effective batch 유지: `BATCH_BI=8 ACCUM_BI=2 BATCH_CROSS=8 ACCUM_CROSS=4 ./scripts/run_training_gcp.sh` |
+
+

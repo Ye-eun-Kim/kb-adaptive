@@ -49,6 +49,8 @@ def main():
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
     parser.add_argument("--n_negatives", type=int, default=BI_ENCODER_N_NEGATIVES,
                         help="맥북 MPS OOM 시 10 등으로 줄이기")
+    parser.add_argument("--accumulation_steps", type=int, default=1,
+                        help="Gradient accumulation. effective_batch = batch_size * accumulation_steps (논문 16 맞추기용)")
     parser.add_argument("--max_length_q", type=int, default=128)
     parser.add_argument("--max_length_ctx", type=int, default=256)
     parser.add_argument("--max_triples_per_table", type=int, default=3000)
@@ -113,7 +115,8 @@ def main():
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=ADAMW_WEIGHT_DECAY)
-    total_steps = len(train_loader) * args.epochs
+    steps_per_epoch = (len(train_loader) + args.accumulation_steps - 1) // args.accumulation_steps
+    total_steps = steps_per_epoch * args.epochs
     from transformers import get_linear_schedule_with_warmup
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -125,7 +128,8 @@ def main():
         model.train()
         total_loss = 0.0
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
-        for batch in pbar:
+        optimizer.zero_grad()
+        for i, batch in enumerate(pbar):
             q_ids = batch["query_input_ids"].to(device)
             q_mask = batch["query_attention_mask"].to(device)
             ctx_ids = batch["context_input_ids"].to(device)
@@ -135,17 +139,17 @@ def main():
 
             q_emb, c_emb = model(q_ids, q_mask, ctx_ids, ctx_mask)
             B = q_emb.size(0)
-            # c_emb: (B * (1+n_neg), D)
             c_emb = c_emb.view(B, 1 + n_neg, -1)
-            loss = contrastive_loss(q_emb, c_emb, n_pos=1, n_neg=n_neg)
-
-            optimizer.zero_grad()
+            loss = contrastive_loss(q_emb, c_emb, n_pos=1, n_neg=n_neg) / args.accumulation_steps
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
-            total_loss += loss.item()
-            pbar.set_postfix(loss=loss.item())
+            total_loss += loss.item() * args.accumulation_steps
+
+            if (i + 1) % args.accumulation_steps == 0 or (i + 1) == len(train_loader):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+            pbar.set_postfix(loss=loss.item() * args.accumulation_steps)
         print(f"Epoch {epoch+1} avg loss: {total_loss / len(train_loader):.4f}")
 
         save_path = os.path.join(args.output_dir, f"epoch_{epoch+1}.pt")

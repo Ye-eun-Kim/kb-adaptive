@@ -15,9 +15,11 @@ if ! command -v nvidia-smi &>/dev/null; then
 fi
 nvidia-smi
 
-echo "[3/5] Python 3.10 + venv..."
-sudo apt-get install -y -qq python3.10 python3.10-venv python3-pip
-PYTHON=$(which python3.10 || which python3)
+echo "[3/5] Python 3.11 + venv..."
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt-get update -qq
+sudo apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
+PYTHON=$(which python3.11)
 $PYTHON -m venv ~/venv
 source ~/venv/bin/activate
 pip install --upgrade pip
