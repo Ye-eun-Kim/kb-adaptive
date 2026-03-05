@@ -1,7 +1,6 @@
 #!/bin/bash
 # GCP VM에서 전체 학습 파이프라인 실행 (Bi-encoder → Cross-encoder)
-# 논문: Bi effective batch 16 / n_neg 25, Cross effective batch 32 / n_neg 50
-# 기본값은 L4 24GB (8/2, 8/4). A100 등이면: BATCH_BI=16 ACCUM_BI=1 BATCH_CROSS=32 ACCUM_CROSS=1
+# 기본값: L4 24GB에서 OOM 없이 돌리기용 (논문 수치 아님. 논문은 batch 16/32, n_neg 25/50)
 # VM 내부에서: cd ~/kb-adaptive && ./scripts/run_training_gcp.sh
 
 set -e
@@ -12,13 +11,13 @@ DATA_ROOT="${DATA_ROOT:-dataset_ketqa}"
 OUT_BI="${OUT_BI:-outputs/bi_encoder}"
 OUT_CROSS="${OUT_CROSS:-outputs/cross_encoder}"
 DEVICE="${DEVICE:-cuda}"
-# L4 24GB 기본값 (effective batch 논문과 동일 16/32). A100이면 BATCH_BI=16 ACCUM_BI=1 BATCH_CROSS=32 ACCUM_CROSS=1
-BATCH_BI="${BATCH_BI:-8}"
+# 일단 돌리기용: 메모리 여유 있게 (L4 24GB)
+BATCH_BI="${BATCH_BI:-4}"
 ACCUM_BI="${ACCUM_BI:-2}"
-N_NEG_BI="${N_NEG_BI:-25}"
-BATCH_CROSS="${BATCH_CROSS:-8}"
+N_NEG_BI="${N_NEG_BI:-12}"
+BATCH_CROSS="${BATCH_CROSS:-4}"
 ACCUM_CROSS="${ACCUM_CROSS:-4}"
-N_NEG_CROSS="${N_NEG_CROSS:-50}"
+N_NEG_CROSS="${N_NEG_CROSS:-24}"
 
 if [ ! -d "$DATA_ROOT/data" ]; then
   echo "Dataset not found at $DATA_ROOT. Copy dataset_ketqa to this directory first."

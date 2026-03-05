@@ -179,6 +179,6 @@ gcloud compute scp --recurse ketqa-train:~/kb-adaptive/outputs ./outputs_from_gc
 | `acceleratorTypes/nvidia-tesla-t4 was not found` | `us-central1-a` 또는 `asia-northeast1-a` 등 T4 지원 zone 사용                                                   |
 | `nvidia-smi` 없음                                  | VM 부팅 후 2–3분 대기 (드라이버 자동 설치)                                                                             |
 | `Dataset not found`                              | `ls dataset_ketqa/data` 로 train.json 있는지 확인, 경로가 `~/kb-adaptive/dataset_ketqa` 인지 확인                     |
-| CUDA OOM (L4 24GB 등)                             | 논문 effective batch 유지: `BATCH_BI=8 ACCUM_BI=2 BATCH_CROSS=8 ACCUM_CROSS=4 ./scripts/run_training_gcp.sh` |
+| CUDA OOM | 기본이 이미 보수적(일단 돌리기용). 그래도 OOM이면 `BATCH_BI=2 N_NEG_BI=8 BATCH_CROSS=2 N_NEG_CROSS=16` 등으로 더 줄이기 |
 
 
