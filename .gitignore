@@ -1,0 +1,28 @@
+# KET-QA 대용량 데이터셋 (로컬에서만 유지)
+dataset_ketqa/
+
+# 학습/평가 출력
+outputs/
+*.pt
+*.pth
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.venv/
+venv/
+env/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 기타 대용량/임시
+*.jsonl
