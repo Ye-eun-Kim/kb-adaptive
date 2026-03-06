@@ -173,12 +173,32 @@ VM 한 대에서 Bi → Cross 순서로 돌리면 OOM 때문에 배치를 줄여
 
 ## 6. 결과 다운로드 (VM → 로컬)
 
-학습이 끝난 뒤:
+학습이 끝난 뒤 VM에서 로컬로 받을 때 두 가지 방법이 있다.
+
+### 6.1 scp (간단하지만 끊기면 처음부터)
 
 ```bash
-# 로컬에서
-gcloud compute scp --recurse ketqa-train:~/kb-adaptive/outputs ./outputs_from_gcp --zone=$ZONE
+# 로컬에서 (ZONE, VM 이름 본인 걸로)
+gcloud compute scp --recurse ketqa-train:~/kb-adaptive/outputs ./outputs_from_gcp --zone=us-central1-b
+# 또는 bi/cross만
+gcloud compute scp --recurse ketqa-train:~/kb-adaptive/outputs/bi_encoder ./outputs_bi_from_gcp --zone=us-central1-b
 ```
+
+**주의:** `scp`는 연결이 끊기면 **이어받기 불가**. 인터넷 끊김·핫스팟 전환 시 전송이 중단되면 **다시 같은 명령으로 처음부터** 받아야 한다. 대용량이거나 연결이 불안정하면 아래 GCS 경유를 쓰는 것이 안전하다.
+
+### 6.2 GCS 경유 (끊겨도 재개 가능, 대용량 권장)
+
+VM → GCS → 로컬 순으로 하면 `gsutil`이 대용량 전송 시 재개를 지원한다.
+
+```bash
+# 1) VM 안에서: outputs를 버킷으로 업로드
+gsutil -m cp -r ~/kb-adaptive/outputs gs://YOUR_BUCKET/outputs
+
+# 2) 로컬에서: 버킷에서 다운로드 (끊겨도 다시 실행하면 이어받기 가능)
+gsutil -m cp -r gs://YOUR_BUCKET/outputs ./outputs_from_gcp
+```
+
+버킷에 VM 서비스 계정 접근 권한이 있어야 한다 (이미 데이터 업로드할 때 설정했다면 동일 버킷 사용 가능).
 
 ---
 

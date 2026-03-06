@@ -5,8 +5,10 @@ Paper: 20 epochs, batch 16, kNS n=25, AdamW 1e-5, linear schedule, warm-up, drop
 """
 
 import argparse
+import json
 import os
 import sys
+from datetime import datetime
 
 import torch
 from torch.utils.data import DataLoader
@@ -58,6 +60,7 @@ def main():
                         help="Train 샘플 수 상한 (train.json 앞에서 N개만 사용). 예: 500 = (question, table) 500개로만 학습")
     parser.add_argument("--device", type=str, default=None,
                         help="cuda | mps(Mac GPU) | cpu. 기본: cuda > mps > cpu")
+    parser.add_argument("--fp16", action="store_true", help="AMP 혼합 정밀도 (메모리 절감, CUDA만)")
     args = parser.parse_args()
     if args.device is None:
         args.device = "cuda" if torch.cuda.is_available() else ("mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu")
@@ -66,6 +69,14 @@ def main():
     from retriever.config import TABLE_DIR, ENTITY_BASE_DIR, QA_DATA_DIR
 
     os.makedirs(args.output_dir, exist_ok=True)
+    # 실험 추적: 이번 실행에 쓴 설정 저장
+    run_config = {
+        "started_at": datetime.now().isoformat(),
+        "effective_batch": args.batch_size * args.accumulation_steps,
+        **vars(args),
+    }
+    with open(os.path.join(args.output_dir, "run_config.json"), "w") as f:
+        json.dump(run_config, f, indent=2)
 
     tokenizer_q = BertTokenizer.from_pretrained(args.model_name)
     tokenizer_ctx = BertTokenizer.from_pretrained(args.model_name)
@@ -113,6 +124,9 @@ def main():
     model.query_encoder.resize_token_embeddings(len(tokenizer_q))
     model.context_encoder.resize_token_embeddings(len(tokenizer_ctx))
     model = model.to(device)
+    # 메모리 절감: activation 재계산으로 VRAM 대폭 감소 (L4 등에서 논문 배치 가능)
+    model.query_encoder.gradient_checkpointing_enable()
+    model.context_encoder.gradient_checkpointing_enable()
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=ADAMW_WEIGHT_DECAY)
     steps_per_epoch = (len(train_loader) + args.accumulation_steps - 1) // args.accumulation_steps
@@ -124,6 +138,7 @@ def main():
         num_training_steps=total_steps,
     )
 
+    scaler = torch.cuda.amp.GradScaler() if (args.fp16 and args.device == "cuda") else None
     for epoch in range(args.epochs):
         model.train()
         total_loss = 0.0
@@ -137,16 +152,30 @@ def main():
             n_pos = batch["n_pos"]
             n_neg = batch["n_neg"]
 
-            q_emb, c_emb = model(q_ids, q_mask, ctx_ids, ctx_mask)
-            B = q_emb.size(0)
-            c_emb = c_emb.view(B, 1 + n_neg, -1)
-            loss = contrastive_loss(q_emb, c_emb, n_pos=1, n_neg=n_neg) / args.accumulation_steps
-            loss.backward()
+            if scaler is not None:
+                with torch.cuda.amp.autocast():
+                    q_emb, c_emb = model(q_ids, q_mask, ctx_ids, ctx_mask)
+                    B = q_emb.size(0)
+                    c_emb = c_emb.view(B, 1 + n_neg, -1)
+                    loss = contrastive_loss(q_emb, c_emb, n_pos=1, n_neg=n_neg) / args.accumulation_steps
+                scaler.scale(loss).backward()
+            else:
+                q_emb, c_emb = model(q_ids, q_mask, ctx_ids, ctx_mask)
+                B = q_emb.size(0)
+                c_emb = c_emb.view(B, 1 + n_neg, -1)
+                loss = contrastive_loss(q_emb, c_emb, n_pos=1, n_neg=n_neg) / args.accumulation_steps
+                loss.backward()
             total_loss += loss.item() * args.accumulation_steps
 
             if (i + 1) % args.accumulation_steps == 0 or (i + 1) == len(train_loader):
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                if scaler is not None:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
             pbar.set_postfix(loss=loss.item() * args.accumulation_steps)

@@ -47,3 +47,9 @@ GCP에서 논문 설정 그대로 실험하기 전 점검용 체크리스트.
 
 - **Negative sampling**: 논문은 Bi-encoder에 kNS(n=25), Cross는 random(n=50). 구현은 Bi/Cross 모두 **random** (kNS 미구현). 성능 차이는 있을 수 있으나 실험 가능.
 - **Optimizer**: 논문 "Adam" → 구현 **AdamW + weight_decay 0.01** (BERT 파인튜닝에서 일반적).
+
+## 7. L4 24GB에서 논문 배치로 돌리기
+
+- **Gradient checkpointing**: Bi/Cross 학습 시 encoder에 `gradient_checkpointing_enable()` 적용 → activation을 저장하지 않고 backward 시 재계산하여 VRAM 대폭 감소.
+- **FP16 (AMP)**: `--fp16` 으로 혼합 정밀도 학습 → 메모리 약 절반.
+- 위 두 가지를 켠 상태에서 `run_training_gcp.sh` 기본값은 **논문과 동일** (Bi batch 16 / n_neg 25, Cross batch 32 / n_neg 50).

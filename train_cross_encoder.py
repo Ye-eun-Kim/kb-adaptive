@@ -5,8 +5,10 @@ Paper: 5 epochs, batch 32, random n=50, AdamW 1e-5, linear schedule, warm-up, dr
 """
 
 import argparse
+import json
 import os
 import sys
+from datetime import datetime
 
 import torch
 from torch.utils.data import DataLoader
@@ -56,6 +58,9 @@ def main():
                         help="Train 샘플 수 상한 (train.json 앞에서 N개만 사용). 예: 500 = (question, table) 500개로만 학습")
     parser.add_argument("--device", type=str, default=None,
                         help="cuda | mps(Mac GPU) | cpu. 기본: cuda > mps > cpu")
+    parser.add_argument("--resume_from", type=str, default=None,
+                        help="이어받기: epoch_N.pt 경로 (예: outputs/cross_encoder/epoch_2.pt)")
+    parser.add_argument("--fp16", action="store_true", help="AMP 혼합 정밀도 (메모리 절감, CUDA만)")
     args = parser.parse_args()
     if args.device is None:
         args.device = "cuda" if torch.cuda.is_available() else ("mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu")
@@ -64,6 +69,14 @@ def main():
     from retriever.config import TABLE_DIR, ENTITY_BASE_DIR, QA_DATA_DIR
 
     os.makedirs(args.output_dir, exist_ok=True)
+    # 실험 추적: 이번 실행에 쓴 설정 저장
+    run_config = {
+        "started_at": datetime.now().isoformat(),
+        "effective_batch": args.batch_size * args.accumulation_steps,
+        **vars(args),
+    }
+    with open(os.path.join(args.output_dir, "run_config.json"), "w") as f:
+        json.dump(run_config, f, indent=2)
 
     tokenizer = RobertaTokenizer.from_pretrained(args.model_name)
     add_special_tokens(tokenizer)
@@ -97,18 +110,29 @@ def main():
     model = CrossEncoder(model_name=args.model_name, dropout=DROPOUT_RATE)
     model.roberta.resize_token_embeddings(len(tokenizer))
     model = model.to(device)
+    # 메모리 절감: activation 재계산으로 VRAM 대폭 감소 (L4 등에서 논문 배치 가능)
+    model.roberta.gradient_checkpointing_enable()
+
+    start_epoch = 0
+    if args.resume_from and os.path.isfile(args.resume_from):
+        ckpt = torch.load(args.resume_from, map_location=device)
+        model.load_state_dict(ckpt["model_state"], strict=True)
+        start_epoch = ckpt.get("epoch", 0)
+        print(f"Resumed from {args.resume_from} (epoch {start_epoch}), will train from epoch {start_epoch + 1} to {args.epochs}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=ADAMW_WEIGHT_DECAY)
     steps_per_epoch = (len(train_loader) + args.accumulation_steps - 1) // args.accumulation_steps
-    total_steps = steps_per_epoch * args.epochs
+    num_epochs_remaining = args.epochs - start_epoch
+    total_steps = steps_per_epoch * num_epochs_remaining
     from transformers import get_linear_schedule_with_warmup
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=int(total_steps * WARMUP_RATIO),
+        num_warmup_steps=0 if start_epoch > 0 else int(total_steps * WARMUP_RATIO),
         num_training_steps=total_steps,
     )
 
-    for epoch in range(args.epochs):
+    scaler = torch.cuda.amp.GradScaler() if (args.fp16 and args.device == "cuda") else None
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         total_loss = 0.0
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
@@ -117,14 +141,26 @@ def main():
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
-            out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            loss = out["loss"] / args.accumulation_steps
-            loss.backward()
+            if scaler is not None:
+                with torch.cuda.amp.autocast():
+                    out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                    loss = out["loss"] / args.accumulation_steps
+                scaler.scale(loss).backward()
+            else:
+                out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                loss = out["loss"] / args.accumulation_steps
+                loss.backward()
             total_loss += loss.item() * args.accumulation_steps
 
             if (i + 1) % args.accumulation_steps == 0 or (i + 1) == len(train_loader):
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                if scaler is not None:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
             pbar.set_postfix(loss=loss.item() * args.accumulation_steps)
