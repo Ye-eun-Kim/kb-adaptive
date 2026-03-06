@@ -11,13 +11,13 @@ DATA_ROOT="${DATA_ROOT:-dataset_ketqa}"
 OUT_BI="${OUT_BI:-outputs/bi_encoder}"
 OUT_CROSS="${OUT_CROSS:-outputs/cross_encoder}"
 DEVICE="${DEVICE:-cuda}"
-# L4 24GB에서 OOM 나지 않게 (매우 보수적)
+# L4 24GB: Cross는 RoBERTa가 무거워서 batch 1, n_neg 8로 더 줄임
 BATCH_BI="${BATCH_BI:-2}"
 ACCUM_BI="${ACCUM_BI:-4}"
 N_NEG_BI="${N_NEG_BI:-8}"
-BATCH_CROSS="${BATCH_CROSS:-2}"
-ACCUM_CROSS="${ACCUM_CROSS:-8}"
-N_NEG_CROSS="${N_NEG_CROSS:-16}"
+BATCH_CROSS="${BATCH_CROSS:-1}"
+ACCUM_CROSS="${ACCUM_CROSS:-16}"
+N_NEG_CROSS="${N_NEG_CROSS:-8}"
 
 if [ ! -d "$DATA_ROOT/data" ]; then
   echo "Dataset not found at $DATA_ROOT. Copy dataset_ketqa to this directory first."
