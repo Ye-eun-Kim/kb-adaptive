@@ -11,13 +11,13 @@ DATA_ROOT="${DATA_ROOT:-dataset_ketqa}"
 OUT_BI="${OUT_BI:-outputs/bi_encoder}"
 OUT_CROSS="${OUT_CROSS:-outputs/cross_encoder}"
 DEVICE="${DEVICE:-cuda}"
-# 일단 돌리기용: 메모리 여유 있게 (L4 24GB)
-BATCH_BI="${BATCH_BI:-4}"
-ACCUM_BI="${ACCUM_BI:-2}"
-N_NEG_BI="${N_NEG_BI:-12}"
-BATCH_CROSS="${BATCH_CROSS:-4}"
-ACCUM_CROSS="${ACCUM_CROSS:-4}"
-N_NEG_CROSS="${N_NEG_CROSS:-24}"
+# L4 24GB에서 OOM 나지 않게 (매우 보수적)
+BATCH_BI="${BATCH_BI:-2}"
+ACCUM_BI="${ACCUM_BI:-4}"
+N_NEG_BI="${N_NEG_BI:-8}"
+BATCH_CROSS="${BATCH_CROSS:-2}"
+ACCUM_CROSS="${ACCUM_CROSS:-8}"
+N_NEG_CROSS="${N_NEG_CROSS:-16}"
 
 if [ ! -d "$DATA_ROOT/data" ]; then
   echo "Dataset not found at $DATA_ROOT. Copy dataset_ketqa to this directory first."
@@ -25,7 +25,7 @@ if [ ! -d "$DATA_ROOT/data" ]; then
 fi
 
 echo "=== Bi-encoder (effective batch $((BATCH_BI * ACCUM_BI)), n_neg $N_NEG_BI) ==="
-python train_bi_encoder.py \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python train_bi_encoder.py \
   --data_root "$DATA_ROOT" \
   --output_dir "$OUT_BI" \
   --device "$DEVICE" \
@@ -34,7 +34,7 @@ python train_bi_encoder.py \
   --accumulation_steps "$ACCUM_BI"
 
 echo "=== Cross-encoder (effective batch $((BATCH_CROSS * ACCUM_CROSS)), n_neg $N_NEG_CROSS) ==="
-python train_cross_encoder.py \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python train_cross_encoder.py \
   --data_root "$DATA_ROOT" \
   --output_dir "$OUT_CROSS" \
   --device "$DEVICE" \

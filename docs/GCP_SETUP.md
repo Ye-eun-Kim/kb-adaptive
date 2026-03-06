@@ -16,11 +16,15 @@ export ZONE=us-central1-a   # T4 사용 가능 zone (서울 미지원)
 gcloud config set project $PROJECT_ID
 
 # 1) GPU VM 생성 (T4, Ubuntu 22.04)
-gcloud compute instances create ketqa-train --zone=$ZONE \
-  --machine-type=n1-standard-8 --accelerator=type=nvidia-tesla-t4,count=1 \
-  --image-family=ubuntu-2204-lts --image-project=ubuntu-os-cloud \
-  --boot-disk-size=100GB --metadata=install-nvidia-driver=True \
-  --maintenance-policy=TERMINATE
+gcloud compute instances create cross-encoder-train \
+  --zone=us-central1-b \
+  --machine-type=g2-standard-8 \
+  --accelerator=type=nvidia-l4,count=1 \
+  --image-family=ubuntu-2204-lts \
+  --image-project=ubuntu-os-cloud \
+  --boot-disk-size=200GB \
+  --maintenance-policy=TERMINATE \
+  --metadata=install-nvidia-driver=True
 
 # 2) GCS 버킷 생성 (한 번만) + 데이터셋 zip 업로드 (로컬에서)
 gsutil mb -l us-central1 gs://YOUR_BUCKET
@@ -63,7 +67,7 @@ gcloud compute instances create ketqa-train \
   --accelerator=type=nvidia-tesla-t4,count=1 \
   --image-family=ubuntu-2204-lts \
   --image-project=ubuntu-os-cloud \
-  --boot-disk-size=100GB \
+  --boot-disk-size=200GB \
   --boot-disk-type=pd-standard \
   --maintenance-policy=TERMINATE \
   --metadata=install-nvidia-driver=True
@@ -150,6 +154,21 @@ nohup ./scripts/run_training_gcp.sh > train.log 2>&1 &
 tail -f train.log
 ```
 
+### 5.5 (선택) VM 2대로 Bi / Cross 나눠서 학습
+
+VM 한 대에서 Bi → Cross 순서로 돌리면 OOM 때문에 배치를 줄여야 합니다. **VM 두 대**를 쓰면 각각 GPU를 하나만 쓰므로 배치를 키울 수 있고, Bi와 Cross를 **동시에** 돌려서 총 시간도 줄일 수 있습니다.
+
+1. **VM 2대 생성** (이름만 다르게, 예: `ketqa-bi`, `ketqa-cross`). 각각 동일하게 클론·환경 세팅·데이터 복사.
+2. **VM1 (ketqa-bi)**
+  `./scripts/run_bi_only_gcp.sh`  
+   (필요하면 `BATCH_BI=8 ACCUM_BI=2 N_NEG_BI=25` 등으로 논문에 가깝게)
+3. **VM2 (ketqa-cross)**
+  `./scripts/run_cross_only_gcp.sh`  
+   (필요하면 `BATCH_CROSS=8 ACCUM_CROSS=4 N_NEG_CROSS=50` 등)
+4. 학습 끝난 뒤 각 VM에서 `outputs/bi_encoder`, `outputs/cross_encoder`를 로컬로 받아 한 폴더에 합치면 됩니다.
+
+비용은 2대 동시 사용분이지만, 병렬로 돌리면 총 걸리는 시간이 줄어서 전체 비용은 비슷할 수 있습니다.
+
 ---
 
 ## 6. 결과 다운로드 (VM → 로컬)
@@ -174,11 +193,11 @@ gcloud compute scp --recurse ketqa-train:~/kb-adaptive/outputs ./outputs_from_gc
 ## 8. 트러블슈팅
 
 
-| 현상                                               | 조치                                                                                                       |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `acceleratorTypes/nvidia-tesla-t4 was not found` | `us-central1-a` 또는 `asia-northeast1-a` 등 T4 지원 zone 사용                                                   |
-| `nvidia-smi` 없음                                  | VM 부팅 후 2–3분 대기 (드라이버 자동 설치)                                                                             |
-| `Dataset not found`                              | `ls dataset_ketqa/data` 로 train.json 있는지 확인, 경로가 `~/kb-adaptive/dataset_ketqa` 인지 확인                     |
-| CUDA OOM | 기본이 이미 보수적(일단 돌리기용). 그래도 OOM이면 `BATCH_BI=2 N_NEG_BI=8 BATCH_CROSS=2 N_NEG_CROSS=16` 등으로 더 줄이기 |
+| 현상                                               | 조치                                                                                            |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `acceleratorTypes/nvidia-tesla-t4 was not found` | `us-central1-a` 또는 `asia-northeast1-a` 등 T4 지원 zone 사용                                        |
+| `nvidia-smi` 없음                                  | VM 부팅 후 2–3분 대기 (드라이버 자동 설치)                                                                  |
+| `Dataset not found`                              | `ls dataset_ketqa/data` 로 train.json 있는지 확인, 경로가 `~/kb-adaptive/dataset_ketqa` 인지 확인          |
+| CUDA OOM                                         | 기본이 이미 보수적(일단 돌리기용). 그래도 OOM이면 `BATCH_BI=2 N_NEG_BI=8 BATCH_CROSS=2 N_NEG_CROSS=16` 등으로 더 줄이기 |
 
 
